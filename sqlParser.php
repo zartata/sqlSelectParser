@@ -57,15 +57,64 @@ function sqlParser($sqlString) {
 	# Should divide it further than the main parts...
 	foreach ($parts as $key => $part) {
 		$partMod = strtoupper($part);
+		$subpart =  isset($parts[$key+1]) ? $parts[$key+1]: '';
 		switch ($partMod) {
-			case 'SELECT': $sqlBuilder->select = $parts[$key+1]; break; 
-			case 'FROM': $sqlBuilder->from = $parts[$key+1]; break; 
-			case 'WHERE': $sqlBuilder->where = $parts[$key+1]; break; 
-			case 'GROUP BY': $sqlBuilder->groupby = $parts[$key+1]; break; 
-			case 'HAVING': $sqlBuilder->having = $parts[$key+1]; break; 
-			case 'ORDER BY': $sqlBuilder->orderby = $parts[$key+1]; break; 
-			case 'LIMIT': $sqlBuilder->limit = $parts[$key+1]; break; 
+			case 'SELECT': parseSelect($sqlBuilder, $subpart); break; 
+			case 'FROM': $sqlBuilder->from = $subpart; break; 
+			case 'WHERE': $sqlBuilder->where = $subpart; break; 
+			case 'GROUP BY': $sqlBuilder->groupby = $subpart; break; 
+			case 'HAVING': $sqlBuilder->having = $subpart; break; 
+			case 'ORDER BY': $sqlBuilder->orderby = $subpart; break; 
+			case 'LIMIT': $sqlBuilder->limit = $subpart; break; 
 		}
 	}
 	return $sqlBuilder;
+}
+
+/** SELECT [option], [(column, alias)] */
+function parseSelect(&$sqlBuilder, $selectString) {
+
+	// If something matches the pattern /whitespace,KEYWORD,whitespace/ where keyword is in UPPER CASE, 
+	// and it exists in the $selectOpions array,then is should be handled as a MySQL keyword.
+	$options = findKeywords($selectString, sqlSelect::$selectOptions, function($e) {return '\s' . $e . '\s';});
+	$options = array_map('trim', $options);
+	$sqlBuilder->select = array_merge($sqlBuilder->select, array('options' => $options));
+	
+	$parts = str_replace($options, '', $selectString);
+	$columnParts = explode(',', $parts);
+	// (?:) is a non-capturing group. The syntax says that AS is optional. 
+	// whitespace (columnname) (AS) (aliasname) whitespace
+	// columnname and aliasname could be `here be dragons` or $total.
+	// Really it should be separated by whitespace or the backtick, if present.
+	// For now, we use an mandatory AS. 
+	// $regex1 = /(\S+)\s+(?:AS\s)?(\S+)/  // with whitespace separated
+	// $regex2 = /`([^`]+)`\s+(?:AS\s)?`([^`]+)`/  // with back-tick separated
+	// $columnPart = "(`(?:[^`]+)`|(?:\S+))";
+	// $aliasPart = $columnPart;
+	// $optionalAliasKeyword = (?:AS\s)?
+	// Combined? : "/" . $columnPart . "\s+" . $optionalAliasKeyword. "\s*" . $aliasPart . "/";
+	foreach ($columnParts as $columnPart) {
+		$t = explode(' AS ', $columnPart);
+		# If there is no alias, just assign a number to it.
+		if (isset($t[1])) {
+			$alias = trim($t[1]);
+			$columns[$alias] = trim($t[0]);
+		} else {
+			$columns[] = trim($t[0]);
+		}
+	}
+	$sqlBuilder->select = array_merge($sqlBuilder->select, array('columns' => $columns));
+}
+
+// Helper function. 
+function findKeywords($string, $keywordsArray, $preprocessFunction = null) {
+	if ($preprocessFunction === null) {
+		$preparedKeywords = $keywordsArray;
+	} else {
+		$preparedKeywords = array_map($preprocessFunction, $keywordsArray);
+	}
+	$regexSplitBy = '/' . implode('|', $preparedKeywords) . '/';
+	$matches = array();
+	preg_match_all($regexSplitBy, $string, $matches);
+	return $matches[0];
 }
